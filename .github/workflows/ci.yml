@@ -57,8 +57,13 @@ jobs:
       - name: Cache Cargo
         uses: Swatinem/rust-cache@9bdad043e88c75890e36ad3bbc8d27f0090dd609 # v2
 
-      - name: Build on MSRV
-        run: cargo build --workspace
+      # MSRV is a promise about the PUBLISHED libraries and their normal
+      # dependency trees (thiserror, memmap2, serde, forensicnomicon), which all
+      # build on 1.80. The dev-only fixtures crate pulls tempfile -> getrandom
+      # (edition 2024, MSRV 1.85); dev tooling legitimately tracks newer Rust, so
+      # it is excluded from the floor promise.
+      - name: Build published libraries on MSRV
+        run: cargo build -p ese-core -p ese-integrity -p ese-carver
 
   deny:
     name: cargo-deny
