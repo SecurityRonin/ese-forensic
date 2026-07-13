@@ -31,7 +31,7 @@ forensicnomicon = "1"
 tempfile = "3"
 
 # Internal
-ese-core          = { path = "crates/ese-core", version = "0.1.0" }
+ese-core          = { path = "crates/ese-core", version = "0.2.0" }
 ese-integrity     = { path = "crates/ese-integrity" }
 ese-carver        = { path = "crates/ese-carver" }
 ese-test-fixtures = { path = "crates/ese-test-fixtures" }

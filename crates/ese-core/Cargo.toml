@@ -1,6 +1,6 @@
 [package]
 name = "ese-core"
-version = "0.1.0"
+version = "0.2.0"
 description = "ESE (Extensible Storage Engine) database binary format reader"
 edition.workspace = true
 rust-version.workspace = true
