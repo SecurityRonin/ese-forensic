@@ -282,6 +282,40 @@ mod tests {
     }
 
     #[test]
+    fn parse_real_catalog_record_max_pgnofdp_does_not_overflow() {
+        // pgnoFDP = u32::MAX from hostile bytes must not panic on the 0-based →
+        // physical (+1) conversion; it saturates instead.
+        let name = b"MaxTable";
+        let name_len = name.len() as u16;
+        let mut data = vec![0u8; 20 + 4 + name.len()];
+        data[4..8].copy_from_slice(&u32::MAX.to_le_bytes()); // pgnoFDP at i-16
+        data[20] = 0xff;
+        data[21] = 0x00;
+        data[22..24].copy_from_slice(&name_len.to_le_bytes());
+        data[24..24 + name.len()].copy_from_slice(name);
+
+        let entry = CatalogEntry::parse_real_catalog_record(&data).expect("TABLE entry");
+        assert_eq!(entry.table_page, u32::MAX);
+    }
+
+    #[test]
+    fn scan_catalog_page_data_max_pgnofdp_does_not_overflow() {
+        // Same overflow guard for the page-scan variant.
+        let name = b"MaxTable";
+        let name_len = name.len() as u16;
+        let mut data = vec![0u8; 20 + 4 + name.len()];
+        data[4..8].copy_from_slice(&u32::MAX.to_le_bytes()); // pgnoFDP at i-16
+        data[20] = 0xff;
+        data[21] = 0x00;
+        data[22..24].copy_from_slice(&name_len.to_le_bytes());
+        data[24..24 + name.len()].copy_from_slice(name);
+
+        let entries = CatalogEntry::scan_catalog_page_data(&data);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].table_page, u32::MAX);
+    }
+
+    #[test]
     fn parse_real_catalog_record_returns_none_for_synthetic_format() {
         // Synthetic format starts with object_type u16 = [0x01, 0x00],
         // which does not contain the 0xFF marker, so must return None.
