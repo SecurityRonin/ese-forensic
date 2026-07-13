@@ -1,0 +1,56 @@
+[package]
+name = "ese-fuzz"
+version = "0.0.1"
+edition = "2021"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+tempfile = "3"
+ese-core = { path = "../crates/ese-core" }
+ese-integrity = { path = "../crates/ese-integrity" }
+ese-carver = { path = "../crates/ese-carver" }
+
+# One target per parsed ESE structure. Each invariant is "must not panic" on
+# arbitrary attacker-controllable bytes.
+
+[[bin]]
+name = "fuzz_ese_open"
+path = "fuzz_targets/fuzz_ese_open.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_catalog"
+path = "fuzz_targets/fuzz_catalog.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_page"
+path = "fuzz_targets/fuzz_page.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_record"
+path = "fuzz_targets/fuzz_record.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_integrity"
+path = "fuzz_targets/fuzz_integrity.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_carver"
+path = "fuzz_targets/fuzz_carver.rs"
+test = false
+doc = false
