@@ -16,6 +16,9 @@
 use ese_core::EsePage;
 
 const HEADER_SIZE: usize = 40;
+/// Value-data base on a large page: 40-byte standard header + 40-byte extended
+/// page header (three ECC checksums + page number + reserved).
+const LARGE_PAGE_VALUE_BASE: usize = 80;
 
 /// Build a large ESE page with one record whose relative tag offset exceeds the
 /// 13-bit (`0x1fff` = 8191) small-page limit.
@@ -27,8 +30,8 @@ fn make_large_page_with_high_offset(page_size: usize, rel_offset: u16, record: &
     d[0x10..0x14].copy_from_slice(&0xFFFF_FFFFu32.to_le_bytes());
     d[0x14..0x18].copy_from_slice(&0xFFFF_FFFFu32.to_le_bytes());
 
-    // Record at absolute HEADER_SIZE + rel_offset.
-    let abs = HEADER_SIZE + rel_offset as usize;
+    // Record at absolute value-data base (past the extended header) + rel_offset.
+    let abs = LARGE_PAGE_VALUE_BASE + rel_offset as usize;
     d[abs..abs + record.len()].copy_from_slice(record);
 
     // Tag 0: size=40, offset=0 (page header). ESE: size in LOW 15 bits, offset HIGH.

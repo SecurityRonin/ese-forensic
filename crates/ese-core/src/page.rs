@@ -52,6 +52,24 @@ impl EsePage {
     /// Minimum size of the Vista+ page header.
     pub const HEADER_SIZE: usize = 40;
 
+    /// Byte offset at which page value data begins — the base that page-tag
+    /// offsets are relative to.
+    ///
+    /// Large (16 KiB / 32 KiB) pages of format revision >= 17 carry a 40-byte
+    /// *extended* page header (three 8-byte ECC checksums + an 8-byte page
+    /// number + 8 bytes reserved) immediately after the 40-byte standard header,
+    /// so their value data starts at byte 80. Smaller pages start at byte 40.
+    /// (libesedb `esedb_extended_page_header_t`; a page size >= 16384 only
+    /// occurs in revision >= 17 databases.)
+    #[must_use]
+    pub fn value_data_offset(&self) -> usize {
+        if self.data.len() >= 16384 {
+            Self::HEADER_SIZE + 40
+        } else {
+            Self::HEADER_SIZE
+        }
+    }
+
     /// Parse the Vista+ 40-byte page header from `self.data`.
     ///
     /// Layout (all little-endian):
@@ -122,13 +140,26 @@ impl EsePage {
     /// declared tag count.
     pub fn tags(&self) -> Result<Vec<(u16, u16)>, EseError> {
         let hdr = self.parse_header()?;
-        let count = hdr.available_page_tag_count as usize;
         let page_size = self.data.len();
+        // On large (16 KiB / 32 KiB) pages the top nibble of the tag count field
+        // carries page-level flags (libesedb `libesedb_page_header.c`, mask
+        // 0x0fff for format revision >= 0x122); only the low 12 bits are the
+        // count. Small pages use the full 16-bit field.
+        let count_mask: usize = if page_size >= 16384 { 0x0fff } else { 0xffff };
+        let count = (hdr.available_page_tag_count as usize) & count_mask;
         if page_size < count * 4 {
             return Err(EseError::TagArrayOverflow {
                 page: self.page_number,
             });
         }
+        // ESE page-tag field width depends on the page size (libesedb
+        // libesedb_page.c). For format revision >= 17 pages of 16 KiB / 32 KiB
+        // the offset and size use the full 15 bits (mask 0x7FFF) and the tag
+        // flags move into the page value data; for smaller pages they are
+        // 13-bit fields (mask 0x1FFF) whose top 3 bits carry the tag flags. A
+        // page size >= 16384 only occurs in revision >= 17 databases, so the
+        // page size alone selects the correct mask.
+        let tag_mask: u32 = if page_size >= 16384 { 0x7FFF } else { 0x1FFF };
         let mut tags = Vec::with_capacity(count);
         for i in 0..count {
             let tag_offset = page_size - (i + 1) * 4;
@@ -139,13 +170,13 @@ impl EsePage {
                 self.data[tag_offset + 3],
             ]);
             // ESE TAG struct layout (MS-ESEDB §2.2.7.1):
-            //   cb_ (SIZE)   = low  16 bits (bits  0-12 are value, bits 13-15 are flags)
-            //   ib_ (OFFSET) = high 16 bits (bits 16-28 are value, bits 29-31 are flags)
-            // Mask 0x1FFF strips the flag bits from each 13-bit field.
-            let value_size = (raw & 0x1FFF) as u16; // cb_ = SIZE
-            let value_offset = ((raw >> 16) & 0x1FFF) as u16; // ib_ = OFFSET
-                                                              // Guard: absolute position = HEADER_SIZE + relative_offset + size must not exceed page.
-            let end = Self::HEADER_SIZE + usize::from(value_offset) + usize::from(value_size);
+            //   cb_ (SIZE)   = low  16 bits
+            //   ib_ (OFFSET) = high 16 bits
+            let value_size = (raw & tag_mask) as u16; // cb_ = SIZE
+            let value_offset = ((raw >> 16) & tag_mask) as u16; // ib_ = OFFSET
+                                                                // Guard: absolute position = value_data_offset + relative_offset + size must not exceed page.
+            let end =
+                self.value_data_offset() + usize::from(value_offset) + usize::from(value_size);
             if end > self.data.len() {
                 return Err(EseError::RecordTooShort {
                     page: self.page_number,
@@ -175,7 +206,7 @@ impl EsePage {
         let tag_count = hdr.available_page_tag_count as usize;
         let tag_array_bytes = tag_count.saturating_mul(4);
         let tag_array_start = self.data.len().saturating_sub(tag_array_bytes);
-        let start = Self::HEADER_SIZE.min(tag_array_start);
+        let start = self.value_data_offset().min(tag_array_start);
         Ok(&self.data[start..tag_array_start])
     }
 
@@ -196,8 +227,9 @@ impl EsePage {
             });
         }
         let (offset, size) = tags[index];
-        // Tag offsets are relative to the end of the 40-byte Vista+ page header.
-        let start = Self::HEADER_SIZE + offset as usize;
+        // Tag offsets are relative to the start of the page value data (past the
+        // standard, and on large pages the extended, page header).
+        let start = self.value_data_offset() + offset as usize;
         let end = start + size as usize;
         if end > self.data.len() {
             return Err(EseError::RecordTooShort {

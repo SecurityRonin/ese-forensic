@@ -59,7 +59,9 @@ impl Iterator for TableCursor<'_> {
             if tag_sz == 0 {
                 continue; // skip zero-length tags
             }
-            let start = EsePage::HEADER_SIZE.saturating_add(usize::from(tag_off));
+            let start = page
+                .value_data_offset()
+                .saturating_add(usize::from(tag_off));
             let end = start.saturating_add(usize::from(tag_sz));
             if end > page.data.len() {
                 return Some(Err(EseError::Corrupt {
@@ -241,22 +243,45 @@ impl EseDatabase {
     ///
     /// Returns [`EseError`] if any page cannot be read or parsed.
     pub fn walk_leaf_pages(&self, root_page: u32) -> Result<Vec<u32>, EseError> {
-        let page = self.read_page(root_page)?;
+        let mut leaves = Vec::new();
+        let mut visited = std::collections::HashSet::new();
+        self.walk_leaf_pages_inner(root_page, &mut leaves, &mut visited, 0)?;
+        Ok(leaves)
+    }
+
+    /// Recursive worker for [`walk_leaf_pages`].
+    ///
+    /// `visited` breaks child-pointer cycles and `depth` caps the recursion, so
+    /// a malformed (attacker-controllable) B-tree cannot loop or blow the stack.
+    fn walk_leaf_pages_inner(
+        &self,
+        page_number: u32,
+        leaves: &mut Vec<u32>,
+        visited: &mut std::collections::HashSet<u32>,
+        depth: u32,
+    ) -> Result<(), EseError> {
+        // ESE B-trees are shallow; 64 levels is far beyond any real database and
+        // bounds recursion on hostile input.
+        const MAX_DEPTH: u32 = 64;
+        if depth >= MAX_DEPTH || !visited.insert(page_number) {
+            return Ok(());
+        }
+        let page = self.read_page(page_number)?;
         let hdr = page.parse_header()?;
         if hdr.page_flags & crate::PAGE_FLAG_LEAF != 0 {
-            return Ok(vec![root_page]);
+            leaves.push(page_number);
+            return Ok(());
         }
-        // Parent (or root) page: child page reference is in the LAST 4 bytes
-        // of each tag's data.  ESE stores a 0-based data-page number; adding 1
-        // converts it to the physical page number used by read_page().
-        let tag_count = hdr.available_page_tag_count as usize;
-        let mut leaves = Vec::new();
+        // Parent (or root) page: the child page reference is the LAST 4 bytes of
+        // each branch entry (after the common/local B-tree key). The tag count
+        // comes from `tags()`, whose masked length is authoritative on large
+        // pages (the raw header field carries flag bits in its top nibble).
+        let page_count = self.page_count();
+        let tag_count = page.tags()?.len();
         for i in 1..tag_count {
             let data = page.record_data(i)?;
-            // Child page reference is the trailing 4 bytes (after any B-tree key
-            // prefix). Read it through a bounds-checked slice so a record shorter
-            // than 4 bytes is skipped, never a panic — no .unwrap() on an
-            // attacker-controllable length.
+            // Read the trailing u32 through a bounds-checked slice so a record
+            // shorter than 4 bytes is skipped, never a panic.
             let Some(child_bytes) = data.get(data.len().saturating_sub(4)..) else {
                 continue; // cov:unreachable: data.len()-4 clamps to 0, slice always valid
             };
@@ -269,11 +294,15 @@ impl EseDatabase {
                 child_bytes[2],
                 child_bytes[3],
             ]);
-            let child_page = child_ese + 1; // ESE 0-based → physical page
-            let mut child_leaves = self.walk_leaf_pages(child_page)?;
-            leaves.append(&mut child_leaves);
+            let child_page = child_ese.saturating_add(1); // ESE 0-based → physical page
+                                                          // Skip references outside the file rather than erroring: a single
+                                                          // bad branch pointer must not abort the whole walk.
+            if u64::from(child_page) >= page_count {
+                continue;
+            }
+            self.walk_leaf_pages_inner(child_page, leaves, visited, depth + 1)?;
         }
-        Ok(leaves)
+        Ok(())
     }
 
     /// Find the root B-tree page number for the named table.
