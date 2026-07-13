@@ -1,6 +1,6 @@
 [package]
 name = "ese-carver"
-version = "0.1.1"
+version = "0.1.2"
 description = "ESE page carving and fragmented record reconstruction"
 edition.workspace = true
 rust-version.workspace = true

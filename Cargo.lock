@@ -26,7 +26,7 @@ dependencies = [
 
 [[package]]
 name = "ese-carver"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "ese-core",
  "ese-test-fixtures",
@@ -36,7 +36,7 @@ dependencies = [
 
 [[package]]
 name = "ese-core"
-version = "0.1.0"
+version = "0.2.1"
 dependencies = [
  "ese-test-fixtures",
  "memmap2",
@@ -47,7 +47,7 @@ dependencies = [
 
 [[package]]
 name = "ese-integrity"
-version = "0.3.0"
+version = "0.3.2"
 dependencies = [
  "ese-core",
  "ese-test-fixtures",
