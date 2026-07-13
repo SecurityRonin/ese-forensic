@@ -1,0 +1,20 @@
+[package]
+name = "ese-core"
+version = "0.1.0"
+description = "ESE (Extensible Storage Engine) database binary format reader"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+memmap2.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+ese-test-fixtures.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

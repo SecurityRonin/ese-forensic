@@ -1,0 +1,80 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/ese-core",
+    "crates/ese-integrity",
+    "crates/ese-carver",
+    "crates/ese-test-fixtures",
+]
+
+[workspace.package]
+edition = "2021"
+rust-version = "1.80"
+license = "Apache-2.0"
+repository = "https://github.com/SecurityRonin/ese-forensic"
+authors = ["Albert Hui <albert@securityronin.com>"]
+
+[workspace.dependencies]
+# Memory-mapped I/O
+memmap2 = "0.9"
+
+# Error handling
+thiserror = "2"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+
+# Forensic finding model (ese-integrity)
+forensicnomicon = "1"
+
+# Testing
+tempfile = "3"
+
+# Internal
+ese-core          = { path = "crates/ese-core", version = "0.1.0" }
+ese-integrity     = { path = "crates/ese-integrity" }
+ese-carver        = { path = "crates/ese-carver" }
+ese-test-fixtures = { path = "crates/ese-test-fixtures" }
+
+[workspace.lints.rust]
+# ESE files are attacker-influenceable binary forensic evidence. The suite is
+# unsafe-free except the single read-only mmap in ese-core (annotated with a
+# per-site #[allow(unsafe_code)] + SAFETY note), so `deny` — not `forbid` —
+# with that one justified exception.
+unsafe_code = "deny"
+unused_imports = "warn"
+unused_variables = "warn"
+
+[workspace.lints.clippy]
+# Paranoid Gatekeeper: these crates parse untrusted, attacker-controllable ESE
+# binary structures (headers, pages, tags, catalog records). The bar is never
+# panic, never read out of bounds, never trust a length field.
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+correctness = { level = "deny", priority = -1 }
+suspicious = { level = "deny", priority = -1 }
+# Panic-free production code: no unwrap/expect outside tests.
+unwrap_used = { level = "deny", priority = 0 }
+expect_used = { level = "deny", priority = 0 }
+# Pragmatic allows — stylistic pedantic lints that fight the domain.
+module_name_repetitions = { level = "allow", priority = 1 }
+must_use_candidate = { level = "allow", priority = 1 }
+missing_errors_doc = { level = "allow", priority = 1 }
+missing_panics_doc = { level = "allow", priority = 1 }
+cast_possible_truncation = { level = "allow", priority = 1 }
+cast_possible_wrap = { level = "allow", priority = 1 }
+cast_sign_loss = { level = "allow", priority = 1 }
+cast_precision_loss = { level = "allow", priority = 1 }
+unreadable_literal = { level = "allow", priority = 1 }
+similar_names = { level = "allow", priority = 1 }
+doc_markdown = { level = "allow", priority = 1 }
+needless_pass_by_value = { level = "allow", priority = 1 }
+items_after_statements = { level = "allow", priority = 1 }
+map_unwrap_or = { level = "allow", priority = 1 }
+return_self_not_must_use = { level = "allow", priority = 1 }
+implicit_hasher = { level = "allow", priority = 1 }
+too_many_lines = { level = "allow", priority = 1 }
+manual_let_else = { level = "allow", priority = 1 }
+# clippy >= 1.96; the fixtures encode ESE tag words from decimal sizes/offsets,
+# where decimal operands read more clearly than forced hex.
+decimal_bitwise_operands = { level = "allow", priority = 1 }

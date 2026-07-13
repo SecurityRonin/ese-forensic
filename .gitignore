@@ -1,0 +1,24 @@
+/target
+.worktrees/
+.claude/
+
+# cargo-fuzz build artifacts, corpora and crash reproducers (the targets and
+# Cargo.toml are tracked; generated data is not).
+/fuzz/target
+/fuzz/corpus
+/fuzz/artifacts
+/fuzz/coverage
+/fuzz/Cargo.lock
+
+# Real ESE test fixtures (SRUDB.dat, WebCacheV01.dat, etc.) — downloaded
+# locally, never committed; the real-fixture tests skip cleanly when absent.
+tests/data/**/*.dat
+tests/data/**/*.edb
+tests/data/**/*.dit
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp

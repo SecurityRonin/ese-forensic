@@ -1,0 +1,36 @@
+[graph]
+targets = []
+
+[advisories]
+version = 2
+# ese-forensic's dependency tree is deliberately tiny (thiserror, memmap2, serde,
+# forensicnomicon). No advisories are currently ignored; add an entry here only
+# with a written justification and no available upgrade path.
+ignore = []
+
+[licenses]
+version = 2
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "CC0-1.0",
+    "Zlib",
+]
+# Confidence threshold for license detection
+confidence-threshold = 0.8
+
+[bans]
+multiple-versions = "warn"
+# workspace = true dependencies have no inline version; allow them
+wildcards = "allow"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

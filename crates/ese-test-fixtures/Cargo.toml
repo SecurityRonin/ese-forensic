@@ -1,0 +1,15 @@
+[package]
+name = "ese-test-fixtures"
+version = "0.1.0"
+description = "Shared ESE test fixture builders — dev-dependency only, never ships"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+ese-core.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

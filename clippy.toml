@@ -1,0 +1,12 @@
+# Allow unwrap()/expect() inside test functions and #[cfg(test)] modules.
+# Production code keeps clippy::unwrap_used/expect_used = deny (see workspace
+# Cargo.toml); tests and diagnostic bins legitimately unwrap to fail loudly.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+
+# ESE/forensic domain identifiers that look like code to clippy::doc_markdown.
+doc-valid-idents = [
+    "SRUDB", "WebCacheV01", "NTDS", "ESE", "JET", "SRUM", "IndexedDB",
+    "macOS", "iOS", "URL", "JSON", "UTF-8", "GUID", "FDP", "ECC", "XOR",
+    "SHA-256", "MD5", "libesedb", "esedbexport",
+]
