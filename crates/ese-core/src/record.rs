@@ -373,3 +373,28 @@ pub fn decode_record(
 
     Ok(result)
 }
+
+/// Decode a real ESE data-definition record — fixed, variable AND tagged
+/// columns — using the on-disk column-id classification.
+///
+/// Unlike [`decode_record`] (which targets the legacy small-page fixture
+/// format where byte 1 is a raw variable-column count), this reads the real
+/// format where byte 1 is the highest variable data-type id. Columns are
+/// classified by their catalog id: 1..=127 fixed, 128..=255 variable, >= 256
+/// tagged.
+///
+/// `extended` selects large-page (format revision >= 17, page size >= 16384)
+/// tagged decoding: a 15-bit tagged offset mask and a per-value flags byte.
+///
+/// # Errors
+///
+/// Returns `EseError::Corrupt` only if the record header is unreadable; per-
+/// column decode failures degrade to that column being absent, never a panic.
+pub fn decode_ese_record(
+    record: &[u8],
+    columns: &[ColumnDef],
+    extended: bool,
+) -> Result<Vec<(String, EseValue)>, EseError> {
+    let _ = (record, columns, extended);
+    Ok(Vec::new()) // stub — filled in the GREEN commit
+}

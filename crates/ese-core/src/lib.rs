@@ -21,8 +21,8 @@ pub use page::{
     PAGE_FLAG_PARENT, PAGE_FLAG_ROOT, PAGE_FLAG_SPACE_TREE, PAGE_SIZE,
 };
 pub use record::{
-    coltyp, decode_record, fixed_col_size, verify_page_checksum, ChecksumResult, ColumnDef,
-    EseValue,
+    coltyp, decode_ese_record, decode_record, fixed_col_size, leaf_entry_data,
+    verify_page_checksum, ChecksumResult, ColumnDef, EseValue,
 };
 
 /// Open an ESE database file and return the parsed header.
