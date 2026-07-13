@@ -18,6 +18,31 @@ fn open_real() -> Option<EseDatabase> {
     Some(EseDatabase::open(std::path::Path::new(&path)).expect("open real WebCacheV01.dat"))
 }
 
+/// Bug 2: each `Container_#` table must expose its OWN column set, including the
+/// tagged `Url` column (id 256), not a globally name-deduplicated set.
+#[test]
+fn container_tables_have_own_columns_incl_tagged_url() {
+    let Some(db) = open_real() else {
+        eprintln!("skip: ESE_WEBCACHE not set");
+        return;
+    };
+    for table in ["Container_1", "Container_2"] {
+        let cols = db.table_columns(table).expect("table_columns");
+        // esedbinfo reports 25 columns for Container_1/Container_2.
+        assert_eq!(cols.len(), 25, "{table} must have its own 25 columns");
+        let url = cols
+            .iter()
+            .find(|c| c.name == "Url")
+            .unwrap_or_else(|| panic!("{table} must have its own Url column"));
+        assert_eq!(url.column_id, 256, "Url is tagged column id 256");
+        assert!(
+            cols.iter()
+                .any(|c| c.name == "AccessedTime" && c.column_id == 14),
+            "{table} must have its fixed AccessedTime column (id 14)"
+        );
+    }
+}
+
 /// Bug 1: walking the catalog B-tree must resolve only in-range child pages.
 ///
 /// Before the large-page tag-mask fix, `walk_leaf_pages(5)` dereferenced an
