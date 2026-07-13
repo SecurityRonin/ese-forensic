@@ -164,7 +164,10 @@ impl CatalogEntry {
                 object_type: 1,
                 object_id,
                 parent_object_id: 1,
-                table_page: pgnofdf_raw + 1,
+                // 0-based ESE page → physical page; saturate so a hostile
+                // u32::MAX pgnoFDP cannot overflow (an out-of-range page is
+                // rejected later by read_page).
+                table_page: pgnofdf_raw.saturating_add(1),
                 object_name: name.to_owned(),
             });
             i += 4 + name_len;
@@ -213,7 +216,7 @@ impl CatalogEntry {
             }
             let pgnofdf_raw = u32::from_le_bytes(data[i - 16..i - 12].try_into().ok()?);
             let object_id = u32::from_le_bytes(data[i - 20..i - 16].try_into().ok()?);
-            let table_page = pgnofdf_raw + 1; // ESE 0-based → physical page
+            let table_page = pgnofdf_raw.saturating_add(1); // ESE 0-based → physical page
             return Some(Self {
                 object_type: 1,
                 object_id,
