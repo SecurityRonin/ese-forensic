@@ -73,7 +73,17 @@ impl Iterator for TableCursor<'_> {
                     ),
                 }));
             }
-            return Some(Ok((page_num, tag_idx, page.data[start..end].to_vec())));
+            let raw = &page.data[start..end];
+            // On the extended (large-page) format, leaf entries are B-tree
+            // key-prefixed; strip the key and skip defunct entries so callers
+            // receive clean data-definition records that match esedbexport.
+            if self.db.is_extended_format() {
+                match crate::record::leaf_entry_data(raw, true) {
+                    Some(record) => return Some(Ok((page_num, tag_idx, record.to_vec()))),
+                    None => continue, // defunct or malformed — skip
+                }
+            }
+            return Some(Ok((page_num, tag_idx, raw.to_vec())));
         }
     }
 }

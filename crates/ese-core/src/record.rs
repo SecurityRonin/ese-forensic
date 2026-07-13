@@ -395,6 +395,201 @@ pub fn decode_ese_record(
     columns: &[ColumnDef],
     extended: bool,
 ) -> Result<Vec<(String, EseValue)>, EseError> {
-    let _ = (record, columns, extended);
-    Ok(Vec::new()) // stub — filled in the GREEN commit
+    if record.len() < 4 {
+        return Ok(Vec::new());
+    }
+    let last_fixed = u32::from(record[0]);
+    let last_var = record[1];
+    let var_data_offset = usize::from(u16::from_le_bytes([record[2], record[3]]));
+    let num_var = if last_var > 127 {
+        usize::from(last_var - 127)
+    } else {
+        0
+    };
+
+    let mut result = Vec::new();
+
+    // ── fixed columns (id 1..=127, packed from byte 4 in id order) ───────────
+    let mut cursor = 4usize;
+    for col in columns.iter().filter(|c| c.column_id <= 127) {
+        if col.column_id > last_fixed {
+            break; // record does not contain this (or any higher) fixed column
+        }
+        let Some(size) = fixed_col_size(col.coltyp) else {
+            break; // unsized fixed column: cannot keep the packed offset accurate
+        };
+        let Some(bytes) = record.get(cursor..cursor + size) else {
+            break;
+        };
+        result.push((col.name.clone(), decode_fixed(bytes, col.coltyp)));
+        cursor += size;
+    }
+
+    // ── variable columns (id 128..=255) ──────────────────────────────────────
+    if num_var > 0 {
+        let payload_start = var_data_offset.saturating_add(num_var * 2);
+        for col in columns
+            .iter()
+            .filter(|c| c.column_id >= 128 && c.column_id <= 255)
+        {
+            let idx = (col.column_id - 128) as usize;
+            if idx >= num_var {
+                continue;
+            }
+            let prev_end = if idx == 0 {
+                0usize
+            } else {
+                usize::from(read_le_u16(record, var_data_offset + (idx - 1) * 2) & 0x7FFF)
+            };
+            let raw_end = read_le_u16(record, var_data_offset + idx * 2);
+            if raw_end & 0x8000 != 0 {
+                continue; // NULL
+            }
+            let start = payload_start.saturating_add(prev_end);
+            let end = payload_start.saturating_add(usize::from(raw_end & 0x7FFF));
+            if let Some(bytes) = record.get(start..end) {
+                result.push((
+                    col.name.clone(),
+                    decode_variable_or_tagged(bytes, col.coltyp),
+                ));
+            }
+        }
+    }
+
+    // ── tagged columns (id >= 256) ───────────────────────────────────────────
+    if columns.iter().any(|c| c.column_id >= 256) {
+        decode_tagged_columns(
+            record,
+            columns,
+            extended,
+            var_data_offset,
+            num_var,
+            &mut result,
+        );
+    }
+
+    Ok(result)
+}
+
+/// Read a bounds-checked little-endian `u16`, returning 0 when out of range.
+fn read_le_u16(data: &[u8], off: usize) -> u16 {
+    match data.get(off..off.saturating_add(2)) {
+        Some(b) => u16::from_le_bytes([b[0], b[1]]),
+        None => 0,
+    }
+}
+
+/// Decode the tagged-data region (INDEX format) into any tagged columns
+/// (id >= 256) present in `columns`.
+///
+/// The region begins at the end of the variable data with a tag array of
+/// `{id: u16, offset: u16}` entries; the first entry's masked offset gives the
+/// array size (`(offset & 0x3fff) / 4` entries). Each value spans from its
+/// masked offset to the next entry's (or the record end for the last). On the
+/// extended (large-page) format — or when an entry's `0x4000` bit is set — the
+/// value is prefixed with a 1-byte flags byte. Reference: libesedb
+/// `libesedb_data_definition.c` (INDEX tagged format).
+fn decode_tagged_columns(
+    record: &[u8],
+    columns: &[ColumnDef],
+    extended: bool,
+    var_data_offset: usize,
+    num_var: usize,
+    result: &mut Vec<(String, EseValue)>,
+) {
+    // Tagged region starts right after the variable data.
+    let tagged_start = if num_var > 0 {
+        let last_end =
+            usize::from(read_le_u16(record, var_data_offset + (num_var - 1) * 2) & 0x7FFF);
+        var_data_offset
+            .saturating_add(num_var * 2)
+            .saturating_add(last_end)
+    } else {
+        var_data_offset
+    };
+    if tagged_start.saturating_add(4) > record.len() {
+        return;
+    }
+    let offset_mask: u16 = if extended { 0x7FFF } else { 0x3FFF };
+    let first_offset = read_le_u16(record, tagged_start + 2);
+    let entry_count = usize::from(first_offset & 0x3FFF) / 4;
+
+    // Parse the tag array: (column id, raw offset) per entry.
+    let mut entries: Vec<(u16, u16)> = Vec::with_capacity(entry_count);
+    for k in 0..entry_count {
+        let p = tagged_start + k * 4;
+        if p + 4 > record.len() {
+            break;
+        }
+        entries.push((read_le_u16(record, p), read_le_u16(record, p + 2)));
+    }
+
+    for col in columns.iter().filter(|c| c.column_id >= 256) {
+        let Some(k) = entries
+            .iter()
+            .position(|(id, _)| u32::from(*id) == col.column_id)
+        else {
+            continue; // column has no value in this record
+        };
+        let raw_offset = entries[k].1;
+        let start = tagged_start.saturating_add(usize::from(raw_offset & offset_mask));
+        let end = entries.get(k + 1).map_or(record.len(), |(_, next_off)| {
+            tagged_start.saturating_add(usize::from(next_off & offset_mask))
+        });
+        if start > end {
+            continue;
+        }
+        let Some(mut bytes) = record.get(start..end) else {
+            continue;
+        };
+        // Skip the 1-byte tagged flags prefix on the extended format (or when
+        // the entry's 0x4000 bit is set).
+        if extended || (raw_offset & 0x4000 != 0) {
+            let Some(rest) = bytes.get(1..) else {
+                continue;
+            };
+            bytes = rest;
+        }
+        result.push((
+            col.name.clone(),
+            decode_variable_or_tagged(bytes, col.coltyp),
+        ));
+    }
+}
+
+/// Decode a variable/tagged column value slice by coltyp.
+///
+/// Text is stored as either UTF-16LE (Unicode, codepage 1200) or single-byte
+/// (codepage 1252). The per-column codepage is not read from the catalog, so
+/// UTF-16LE is detected from its interleaved-NUL byte pattern; the trailing NUL
+/// terminator is trimmed either way.
+fn decode_variable_or_tagged(bytes: &[u8], coltyp: u8) -> EseValue {
+    match coltyp {
+        coltyp::TEXT | coltyp::LONG_TEXT => EseValue::Text(decode_ese_text(bytes)),
+        _ => EseValue::Binary(bytes.to_vec()),
+    }
+}
+
+/// Decode an ESE text value, auto-detecting UTF-16LE vs single-byte text.
+fn decode_ese_text(bytes: &[u8]) -> String {
+    let s = if looks_like_utf16le(bytes) {
+        let units: Vec<u16> = bytes
+            .chunks_exact(2)
+            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .collect();
+        String::from_utf16_lossy(&units)
+    } else {
+        String::from_utf8_lossy(bytes).into_owned()
+    };
+    s.trim_end_matches('\0').to_owned()
+}
+
+/// Heuristic: even-length bytes where at least half the high bytes (odd indices)
+/// are NUL indicate UTF-16LE-encoded Latin-script text.
+fn looks_like_utf16le(bytes: &[u8]) -> bool {
+    if bytes.len() < 2 || bytes.len() % 2 != 0 {
+        return false;
+    }
+    let high_nuls = bytes.iter().skip(1).step_by(2).filter(|&&b| b == 0).count();
+    high_nuls * 2 >= bytes.len() / 2
 }
