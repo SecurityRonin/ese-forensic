@@ -137,6 +137,60 @@ pub enum EseValue {
     Guid([u8; 16]),
 }
 
+/// Page-tag flag: the value is a defunct (deleted) entry (libesedb
+/// `LIBESEDB_PAGE_TAG_FLAG_IS_DEFUNCT`).
+const PAGE_TAG_FLAG_IS_DEFUNCT: u8 = 0x02;
+/// Page-tag flag: the entry is prefixed with a 2-byte common-key size (Metz ESE
+/// spec, page entry: "If page tag flag 0x04 is set: common page key size").
+const PAGE_TAG_FLAG_HAS_COMMON_KEY_SIZE: u8 = 0x04;
+
+/// Strip the B-tree page-entry key from a leaf/branch page value and return the
+/// entry data — a data-definition record on a leaf page, or the child-page
+/// pointer bytes on a branch page.
+///
+/// Returns `None` when the entry is marked defunct (deleted) or is malformed.
+///
+/// On large (>= 16384) pages of format revision >= 17 the three page-tag flag
+/// bits live in the top bits of the value's second byte (`value[1] >> 5`), and
+/// the entry layout is
+/// `[common_key_size(2) — only if flag 0x04][local_key_size(2)][local_key][data]`.
+/// libesedb clears those flag bits from `value[1]` before reading the first
+/// 16-bit field, so the size read from that byte masks them off here too.
+/// Reference: libesedb `libesedb_page.c` (flags in value data) and
+/// `libesedb_page_tree_value.c` (key layout).
+///
+/// `extended` selects this layout; small/legacy pages (synthetic fixtures) store
+/// the record directly with no key prefix, so the value is returned unchanged.
+#[must_use]
+pub fn leaf_entry_data(value: &[u8], extended: bool) -> Option<&[u8]> {
+    if !extended || value.len() < 2 {
+        return Some(value);
+    }
+    let flags = value[1] >> 5;
+    if flags & PAGE_TAG_FLAG_IS_DEFUNCT != 0 {
+        return None;
+    }
+    // The flag bits overlay the high 3 bits of value[1] (the high byte of the
+    // first 16-bit field); mask them off before reading that field.
+    let first_field_hi = value[1] & 0x1f;
+    let (mut off, local_key_lo, local_key_hi) = if flags & PAGE_TAG_FLAG_HAS_COMMON_KEY_SIZE != 0 {
+        // First field is the common key size (skipped); the local key size
+        // follows at offset 2 and carries no flag overlay.
+        let lo = *value.get(2)?;
+        let hi = *value.get(3)?;
+        (4usize, lo, hi)
+    } else {
+        // First field IS the local key size; its high byte is the masked value[1].
+        (2usize, value[0], first_field_hi)
+    };
+    let local_key_size = u16::from_le_bytes([local_key_lo, local_key_hi]) as usize;
+    off = off.checked_add(local_key_size)?;
+    if off > value.len() {
+        return None;
+    }
+    Some(&value[off..])
+}
+
 /// Return the fixed byte size for a fixed-length coltyp, or `None` for
 /// variable-length (Binary, Text) and tagged (`LongBinary`, `LongText`) types.
 pub fn fixed_col_size(coltyp: u8) -> Option<usize> {

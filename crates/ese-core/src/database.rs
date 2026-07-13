@@ -192,40 +192,67 @@ impl EseDatabase {
     /// malformed records.
     pub fn catalog_entries(&self) -> Result<Vec<CatalogEntry>, EseError> {
         const CATALOG_ROOT: u32 = 5; // physical page 5 = ESE catalog root (fdp=2)
+        let extended = self.is_extended_format();
         let leaf_pages = self.walk_leaf_pages(CATALOG_ROOT)?;
-        // Last-wins: real SRUDB.dat files contain two catalog entries with the same
-        // GUID name — a placeholder (empty page) registered first and the live data
-        // entry registered second. Walking the B-tree in key order, the second entry
-        // resides on a later leaf page and must overwrite the first so that
-        // find_table_page() returns the correct (non-empty) root page.
-        let mut by_name: std::collections::HashMap<String, CatalogEntry> =
+        // Dedup by (object_type, parent_object_id, object_id) — NOT by name.
+        // Keying by name globally collapses columns that different tables share
+        // (every WebCache Container_# has `Url`, `AccessedTime`, ...). The tuple
+        // is unique per catalog object, so each table keeps its own columns.
+        //
+        // Last-wins on that key still handles the SRUDB.dat case of a placeholder
+        // object registered before the live one with the same identity: walking
+        // the B-tree in key order, the live entry sits on a later leaf and wins.
+        let mut by_key: std::collections::HashMap<(u16, u32, u32), CatalogEntry> =
             std::collections::HashMap::default();
+        let mut insert = |e: CatalogEntry| {
+            by_key.insert((e.object_type, e.parent_object_id, e.object_id), e);
+        };
         for page_num in leaf_pages {
             let page = self.read_page(page_num)?;
-            // First attempt: scan the raw page data area for real ESE catalog records.
-            // Real ESE catalog pages use a cumulative key-prefix-compression layout
-            // where early records live before the first tag offset — scanning the full
-            // data area (header end → tag-array start) finds them all.
-            let real_entries = CatalogEntry::scan_catalog_page_data(page.raw_data_area()?);
-            if real_entries.is_empty() {
-                // Fallback for synthetic test-fixture pages that use the simple
-                // fixed-layout format (no \xff\x00 tagged-column encoding).
-                let tags = page.tags()?;
-                for i in 1..tags.len() {
-                    let data = page.record_data(i)?;
-                    if let Some(entry) = CatalogEntry::parse_real_catalog_record(data) {
-                        by_name.insert(entry.object_name.clone(), entry);
-                    } else if let Ok(entry) = CatalogEntry::from_bytes(data) {
-                        by_name.insert(entry.object_name.clone(), entry);
+            if extended {
+                // Real MSysObjects: each leaf entry (tags 1.., value 0 skipped) is
+                // a key-prefixed data-definition record; strip the key, skip
+                // defunct entries, and decode tables + columns.
+                let tag_count = page.tags()?.len();
+                for i in 1..tag_count {
+                    let value = page.record_data(i)?;
+                    let Some(record) = crate::record::leaf_entry_data(value, true) else {
+                        continue; // defunct or malformed
+                    };
+                    if let Some(entry) = CatalogEntry::decode_catalog_record(record) {
+                        insert(entry);
                     }
                 }
             } else {
-                for entry in real_entries {
-                    by_name.insert(entry.object_name.clone(), entry);
+                // Synthetic / legacy small-page fixtures: scan the raw data area
+                // for real \xff\x00 records, else parse the fixed-layout format.
+                let real_entries = CatalogEntry::scan_catalog_page_data(page.raw_data_area()?);
+                if real_entries.is_empty() {
+                    let tags = page.tags()?;
+                    for i in 1..tags.len() {
+                        let data = page.record_data(i)?;
+                        if let Some(entry) = CatalogEntry::parse_real_catalog_record(data) {
+                            insert(entry);
+                        } else if let Ok(entry) = CatalogEntry::from_bytes(data) {
+                            insert(entry);
+                        }
+                    }
+                } else {
+                    for entry in real_entries {
+                        insert(entry);
+                    }
                 }
             }
         }
-        Ok(by_name.into_values().collect())
+        Ok(by_key.into_values().collect())
+    }
+
+    /// Whether this database uses the large-page extended format (page size
+    /// >= 16384, format revision >= 17): tag offsets past a 40-byte extended
+    /// page header, key-prefixed leaf entries, and tagged-column records.
+    #[must_use]
+    pub fn is_extended_format(&self) -> bool {
+        self.header.page_size >= 16384
     }
 
     /// Walk the B-tree rooted at `root_page` and return the page numbers of

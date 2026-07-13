@@ -227,6 +227,99 @@ impl CatalogEntry {
         }
         None
     }
+
+    /// Decode a real ESE `MSysObjects` (catalog) data-definition record into a
+    /// [`CatalogEntry`].
+    ///
+    /// Returns `None` for records that are not a table (`Type` 1) or column
+    /// (`Type` 2), or that are too short to hold the fixed columns used here.
+    ///
+    /// `MSysObjects` has a fixed, well-known schema (the catalog is
+    /// self-describing; libesedb bootstraps it). The fixed columns used are:
+    ///
+    /// | id | name              | type  | fixed offset |
+    /// |----|-------------------|-------|--------------|
+    /// | 1  | `ObjidTable`      | Int32 | 4            |
+    /// | 2  | `Type`            | Int16 | 8            |
+    /// | 3  | `Id`              | Int32 | 10           |
+    /// | 4  | `ColtypOrPgnoFDP` | Int32 | 14           |
+    ///
+    /// `Name` is the first variable-size column (id 128). For a **table** row
+    /// `ColtypOrPgnoFDP` is the root B-tree page (`pgnoFDP`, ESE 0-based →
+    /// physical `+1`); for a **column** row it is the JET column type. Columns
+    /// are linked to their table by `ObjidTable` (the parent table's FDP), so a
+    /// table sets both `object_id` and `parent_object_id` to `ObjidTable`.
+    #[must_use]
+    pub fn decode_catalog_record(record: &[u8]) -> Option<Self> {
+        // Data-definition header: last_fixed(1), last_var(1), var_data_offset(2).
+        let last_fixed = *record.first()?;
+        let last_var = *record.get(1)?;
+        let var_data_offset = u16::from_le_bytes([*record.get(2)?, *record.get(3)?]) as usize;
+        // Need at least fixed columns 1..=4 (packed at offsets 4, 8, 10, 14).
+        if last_fixed < 4 {
+            return None;
+        }
+        let objid_table = read_le_u32(record, 4)?;
+        let obj_type = i16::from_le_bytes([*record.get(8)?, *record.get(9)?]);
+        let id = read_le_u32(record, 10)?;
+        let coltyp_or_pgno = read_le_u32(record, 14)?;
+        let name = decode_first_variable(record, last_var, var_data_offset)?;
+
+        match obj_type {
+            // Table: root page = pgnoFDP + 1 (ESE 0-based → physical).
+            1 => Some(Self {
+                object_type: 1,
+                object_id: objid_table,
+                parent_object_id: objid_table,
+                table_page: coltyp_or_pgno.saturating_add(1),
+                object_name: name,
+            }),
+            // Column: table_page carries the JET coltyp; parent is ObjidTable.
+            2 => Some(Self {
+                object_type: 2,
+                object_id: id,
+                parent_object_id: objid_table,
+                table_page: coltyp_or_pgno,
+                object_name: name,
+            }),
+            _ => None,
+        }
+    }
+}
+
+/// Read a little-endian `u32` at `off`, or `None` if it falls outside `data`.
+fn read_le_u32(data: &[u8], off: usize) -> Option<u32> {
+    let b = data.get(off..off.checked_add(4)?)?;
+    Some(u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+}
+
+/// Decode the first variable-size column (e.g. `MSysObjects.Name`) of a
+/// data-definition record.
+///
+/// `last_var` is the highest variable data-type id present; the number of
+/// variable columns is `last_var - 127`. The variable end-offset array (2 bytes
+/// per column, high bit = NULL) starts at `var_data_offset`; the value data
+/// follows the array. Returns `None` when there are no variable columns, the
+/// first is NULL, or any offset falls out of bounds.
+fn decode_first_variable(record: &[u8], last_var: u8, var_data_offset: usize) -> Option<String> {
+    if last_var <= 127 {
+        return None;
+    }
+    let num_var = usize::from(last_var - 127);
+    let payload_start = var_data_offset.checked_add(num_var.checked_mul(2)?)?;
+    if payload_start > record.len() {
+        return None;
+    }
+    let raw_end = u16::from_le_bytes([
+        *record.get(var_data_offset)?,
+        *record.get(var_data_offset.checked_add(1)?)?,
+    ]);
+    if raw_end & 0x8000 != 0 {
+        return None; // NULL
+    }
+    let end = payload_start.checked_add(usize::from(raw_end & 0x7fff))?;
+    let bytes = record.get(payload_start..end)?;
+    Some(String::from_utf8_lossy(bytes).into_owned())
 }
 
 #[cfg(test)]
