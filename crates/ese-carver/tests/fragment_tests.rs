@@ -160,3 +160,18 @@ fn reconstruct_returns_stitched_bytes_when_lengths_match() {
     assert_eq!(&stitched[..6], &prefix[..]);
     assert_eq!(&stitched[6..], &suffix[..]);
 }
+
+#[test]
+fn detect_fragments_lying_tag_count_does_not_overflow() {
+    // A page whose tag_count field (u16 at 0x22) claims far more tags than the
+    // page can physically hold must not panic when the tag array walks past the
+    // page start. Fuzz-found (ese-carver/src/lib.rs:127 subtract overflow).
+    let page_size = 0x28; // 40 — the minimum parse_tags_raw accepts
+    let mut pages = vec![0u8; page_size * 3]; // 3 pages so page_idx 1 is scanned
+    // Page index 1 spans bytes [40..80); set its tag_count to u16::MAX.
+    let p1 = page_size; // start of page 1
+    pages[p1 + 0x22] = 0xFF;
+    pages[p1 + 0x23] = 0xFF;
+    // Must return without panicking (result contents are irrelevant here).
+    let _ = detect_fragments(&pages, page_size, 64);
+}
