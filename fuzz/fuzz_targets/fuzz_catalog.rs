@@ -18,4 +18,7 @@ fuzz_target!(|data: &[u8]| {
 
     // Heuristic 0xFF00-anchored real-record parser.
     let _ = CatalogEntry::parse_real_catalog_record(data);
+
+    // Real MSysObjects data-definition decoder over arbitrary bytes.
+    let _ = CatalogEntry::decode_catalog_record(data);
 });

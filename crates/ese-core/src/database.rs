@@ -257,8 +257,8 @@ impl EseDatabase {
         Ok(by_key.into_values().collect())
     }
 
-    /// Whether this database uses the large-page extended format (page size
-    /// >= 16384, format revision >= 17): tag offsets past a 40-byte extended
+    /// Whether this database uses the large-page extended format (page size of
+    /// 16384 or 32768, format revision 17+): tag offsets past a 40-byte extended
     /// page header, key-prefixed leaf entries, and tagged-column records.
     #[must_use]
     pub fn is_extended_format(&self) -> bool {
