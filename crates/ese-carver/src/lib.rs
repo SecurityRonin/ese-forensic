@@ -122,9 +122,17 @@ fn parse_tags_raw(page: &[u8], page_size: usize) -> Option<Vec<(usize, usize)>> 
     if tag_count == 0 {
         return None;
     }
-    let mut tags = Vec::with_capacity(tag_count);
+    // The 4-byte tag array grows downward from the end of the page; it cannot
+    // extend past the header, so never trust tag_count — cap the allocation and
+    // stop before the tag walk would underflow past the page start.
+    let max_tags = (page_size - 0x28) / 4;
+    let mut tags = Vec::with_capacity(tag_count.min(max_tags));
     for i in 0..tag_count {
-        let pos = page_size - (i + 1) * 4;
+        let off = (i + 1) * 4;
+        if off > page_size {
+            break; // no room left for another tag
+        }
+        let pos = page_size - off;
         let raw = u32::from_le_bytes([page[pos], page[pos + 1], page[pos + 2], page[pos + 3]]);
         // Real ESE: cb_ (size) in LOW 13 bits, ib_ (offset) in HIGH 13 bits.
         tags.push((((raw >> 16) & 0x1FFF) as usize, (raw & 0x1FFF) as usize));
