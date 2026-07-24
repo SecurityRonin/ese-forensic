@@ -23,10 +23,12 @@ changelog_update = true
 release_commits = "^(feat|fix|perf|refactor|doc|revert)"
 
 # ese-test-fixtures is publish = false (Cargo.toml); mirror that here so release-plz
-# never version-bumps, tags, or publishes it.
+# never version-bumps, tags, or publishes it. release-plz cross-checks the two:
+# publish = false must be set on both sides, else it errors out.
 [[package]]
 name = "ese-test-fixtures"
 release = false
+publish = false
 
 [changelog]
 commit_parsers = [
