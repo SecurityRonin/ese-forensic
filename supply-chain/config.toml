@@ -17,13 +17,13 @@ url = "https://raw.githubusercontent.com/google/rust-crate-audits/main/audits.to
 url = "https://raw.githubusercontent.com/mozilla/supply-chain/main/audits.toml"
 
 [policy.ese-carver]
-audit-as-crates-io = true
+audit-as-crates-io = false
 
 [policy.ese-core]
-audit-as-crates-io = true
+audit-as-crates-io = false
 
 [policy.ese-integrity]
-audit-as-crates-io = true
+audit-as-crates-io = false
 
 [[exemptions.bitflags]]
 version = "2.13.0"
