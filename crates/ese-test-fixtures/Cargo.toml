@@ -3,7 +3,16 @@ name = "ese-test-fixtures"
 version = "0.1.0"
 description = "Shared ESE test fixture builders — dev-dependency only, never ships"
 edition.workspace = true
-rust-version.workspace = true
+# NOT the workspace floor (1.80). This crate pulls tempfile -> getrandom 0.4,
+# which is edition 2024 and fails at MANIFEST PARSE on any cargo below 1.85:
+#   feature `edition2024` is required ... not stabilized in this version of Cargo
+# The inherited 1.80 was therefore a promise this crate's own dependency graph
+# cannot satisfy. The old ci.yml worked around it by naming only the three
+# published libraries in its MSRV job; the shared workflow derives the MSRV
+# matrix from what each member DECLARES, so the declaration has to be true.
+# Dev tooling legitimately tracks newer Rust and nothing downstream pins this
+# crate (publish = false), so the floor is stated where it actually is.
+rust-version = "1.85"
 license.workspace = true
 repository.workspace = true
 # Dev-only fixture builders — never published to crates.io.
