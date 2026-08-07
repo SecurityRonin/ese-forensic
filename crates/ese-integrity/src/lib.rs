@@ -202,7 +202,8 @@ impl<'a> EseIntegrity<'a> {
     /// Check for database layout problems (truncation).
     ///
     /// Returns `TruncatedDatabase` if the buffer is smaller than
-    /// [`ESE_MIN_BYTES`] or shorter than the declared page count implies.
+    /// the crate-private `ESE_MIN_BYTES` floor (8192) or shorter than the
+    /// declared page count implies.
     pub fn check_layout(&self) -> Vec<EseStructuralAnomaly> {
         if self.data.len() < ESE_MIN_BYTES {
             let actual_pages =
@@ -350,7 +351,7 @@ impl<'a> EseIntegrity<'a> {
 /// - `logical_pgno = page_number - 1`
 /// - `csum = logical_pgno XOR (every 4-byte word in the entire page)`
 /// - A mismatch against the stored XOR at bytes `[4..8]` produces
-///   [`PageChecksumMismatch`].
+///   [`EseStructuralAnomaly::PageChecksumMismatch`].
 ///
 /// This algorithm was confirmed correct against 326/326 non-empty pages in the
 /// chainsaw SRUDB fixture (Python probe, 2026-05-20).
@@ -466,7 +467,7 @@ pub fn detect_autoinc_gaps(ids: &[i32]) -> Vec<EseStructuralAnomaly> {
 /// Per MS-ESEDB spec: ESE marks deleted records in-place by setting `TAG_DEFUNCT=0x2`
 /// in bits 13-15 of the offset word of the 4-byte tag. In the 32-bit tag word this
 /// is bit 14 (`0x4000`). The record bytes are left intact, allowing forensic recovery.
-/// Each such tag is reported as [`DeletedRecordPresent`].
+/// Each such tag is reported as [`EseStructuralAnomaly::DeletedRecordPresent`].
 pub fn find_deleted_records(db: &EseDatabase) -> Vec<EseStructuralAnomaly> {
     // TAG_DEFUNCT=0x2 sits at bits 13-15 of the offset word (low 16 bits of the u32).
     // bit 13 of the u32 = 0x2000, bit 14 = 0x4000; the full 3-bit flag field is 0xE000.

@@ -110,7 +110,7 @@ impl CatalogEntry {
 
     /// Scan the raw data area of an ESE catalog leaf page for all TABLE entries.
     ///
-    /// Unlike [`parse_real_catalog_record`], which scans a single tag's bytes
+    /// Unlike [`Self::parse_real_catalog_record`], which scans a single tag's bytes
     /// and returns the first match, this function scans the entire page data
     /// area (from the end of the 40-byte header to the start of the tag array)
     /// and returns every distinct entry found.
@@ -184,7 +184,7 @@ impl CatalogEntry {
     /// lives 20 bytes before it — both as u32 LE.
     ///
     /// `pgnoFDP` is stored as an ESE 0-based data-page number; this function adds 1
-    /// to convert it to the physical page number expected by [`EseDatabase::read_page`].
+    /// to convert it to the physical page number expected by [`crate::EseDatabase::read_page`].
     ///
     /// Returns `None` if the slice contains no recognisable TABLE entry.
     pub fn parse_real_catalog_record(data: &[u8]) -> Option<Self> {
