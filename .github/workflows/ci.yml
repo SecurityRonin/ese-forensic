@@ -6,88 +6,18 @@ on:
   pull_request:
     branches: [main]
 
-env:
-  CARGO_TERM_COLOR: always
-  RUST_BACKTRACE: 1
+permissions:
+  contents: read
 
 jobs:
-  test:
-    name: Test (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-
-      - name: Cache Cargo
-        uses: Swatinem/rust-cache@9bdad043e88c75890e36ad3bbc8d27f0090dd609 # v2
-
-      - name: Check formatting
-        run: cargo fmt --all -- --check
-
-      - name: Clippy
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
-
-      - name: Build
-        run: cargo build --workspace --all-features
-
-      - name: Test
-        run: cargo test --workspace --all-features
-
-  msrv:
-    name: MSRV (1.80)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
-
-      # Explicit version ref: dtolnay/rust-toolchain@1.80 sets RUSTUP_TOOLCHAIN,
-      # which beats the rust-toolchain.toml pin, so the build genuinely runs on
-      # the declared 1.80 floor — the published-library MSRV promise.
-      - name: Install Rust 1.80
-        uses: dtolnay/rust-toolchain@1.80
-
-      - name: Cache Cargo
-        uses: Swatinem/rust-cache@9bdad043e88c75890e36ad3bbc8d27f0090dd609 # v2
-
-      # MSRV is a promise about the PUBLISHED libraries and their normal
-      # dependency trees (thiserror, memmap2, serde, forensicnomicon), which all
-      # build on 1.80. The dev-only fixtures crate pulls tempfile -> getrandom
-      # (edition 2024, MSRV 1.85); dev tooling legitimately tracks newer Rust, so
-      # it is excluded from the floor promise.
-      - name: Build published libraries on MSRV
-        run: cargo build -p ese-core -p ese-integrity -p ese-carver
-
-  deny:
-    name: cargo-deny
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
-
-      - uses: EmbarkStudios/cargo-deny-action@bb137d7af7e4fb67e5f82a49c4fce4fad40782fe # v2.0.20
-
-  vet:
-    name: Cargo Vet (supply-chain)
-    runs-on: ubuntu-latest
-    # Complements `deny` (known-bad advisories/licenses) with the supply-chain-
-    # injection layer: every dependency version must be human-source-reviewed or
-    # covered by an imported aggregate audit set (Google/Mozilla/Bytecode-Alliance/
-    # Embark). Config in supply-chain/{config,audits,imports}.toml.
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Install cargo-vet
-        uses: taiki-e/install-action@59012be0884e296ca2da49b530610e72c49039ad # v2.81.6
-        with:
-          tool: cargo-vet
-      - name: Fetch dependencies
-        run: cargo fetch
-      - name: Check supply chain
-        run: cargo vet --locked
+  ci:
+    uses: SecurityRonin/fleet-ci/.github/workflows/rust-ci.yml@619094ad54edc586f5c2733358e00326b30790bd
+    with:
+      # The old ci.yml had NO coverage job, so `strict` (100% lines, the input
+      # default) would be a brand-new gate this repo cannot meet. Measured on
+      # origin/main with the same flags this workflow will use
+      # (`cargo llvm-cov --workspace --all-features --summary-only`):
+      # 84.32% lines. The floor is the measurement rounded DOWN — it records
+      # where the repo is, it does not assert where it should be.
+      coverage-gate: floor
+      coverage-floor: 84
