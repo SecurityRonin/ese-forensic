@@ -141,11 +141,16 @@ impl EsePage {
     pub fn tags(&self) -> Result<Vec<(u16, u16)>, EseError> {
         let hdr = self.parse_header()?;
         let page_size = self.data.len();
-        // On large (16 KiB / 32 KiB) pages the top nibble of the tag count field
-        // carries page-level flags (libesedb `libesedb_page_header.c`, mask
-        // 0x0fff for format revision >= 0x122); only the low 12 bits are the
-        // count. Small pages use the full 16-bit field.
-        let count_mask: usize = if page_size >= 16384 { 0x0fff } else { 0xffff };
+        // On modern revisions / large pages, the top 4 bits of the available tag count
+        // field carry page-level flags / ctagReserved (libesedb `libesedb_page_header.c`,
+        // mask 0x0fff for format revision >= 0x122); only the low 12 bits are the count.
+        // On small pages, if the raw tag count overflows the page boundary (count * 4 > page_size),
+        // the high bits are also reserved flags rather than part of the tag count.
+        let count_mask: usize = if page_size >= 16384 || (hdr.available_page_tag_count as usize) * 4 > page_size {
+            0x0fff
+        } else {
+            0xffff
+        };
         let count = (hdr.available_page_tag_count as usize) & count_mask;
         if page_size < count * 4 {
             return Err(EseError::TagArrayOverflow {
@@ -203,9 +208,15 @@ impl EsePage {
     /// Returns [`EseError::Corrupt`] if the header cannot be parsed.
     pub fn raw_data_area(&self) -> Result<&[u8], EseError> {
         let hdr = self.parse_header()?;
-        let tag_count = hdr.available_page_tag_count as usize;
+        let page_size = self.data.len();
+        let count_mask: usize = if page_size >= 16384 || (hdr.available_page_tag_count as usize) * 4 > page_size {
+            0x0fff
+        } else {
+            0xffff
+        };
+        let tag_count = (hdr.available_page_tag_count as usize) & count_mask;
         let tag_array_bytes = tag_count.saturating_mul(4);
-        let tag_array_start = self.data.len().saturating_sub(tag_array_bytes);
+        let tag_array_start = page_size.saturating_sub(tag_array_bytes);
         let start = self.value_data_offset().min(tag_array_start);
         Ok(&self.data[start..tag_array_start])
     }
@@ -574,5 +585,34 @@ mod tests {
             "record_data must add HEADER_SIZE(40) to tag offset; \
              relative offset 2 must read from absolute byte 42, not byte 2"
         );
+    }
+
+    #[test]
+    fn tags_masks_high_flags_on_small_page_when_raw_count_overflows() {
+        // Format revision >= 0x122 can have reserved flags in the top 4 bits of
+        // available_page_tag_count (e.g. 0x1007 = 4103 tags on a 4096-byte page).
+        // Without masking 0x0FFF, 4103 * 4 = 16412 > 4096 causes TagArrayOverflow.
+        // With 0x0FFF masking, count is 7.
+        let mut data = vec![0u8; 4096];
+        data[0x22..0x24].copy_from_slice(&0x1002u16.to_le_bytes()); // tag count = 0x1002 (2 tags + flag 0x1000)
+        data[0x24..0x28].copy_from_slice(&PAGE_FLAG_LEAF.to_le_bytes());
+        data[0x10..0x14].copy_from_slice(&0xFFFF_FFFFu32.to_le_bytes());
+        data[0x14..0x18].copy_from_slice(&0xFFFF_FFFFu32.to_le_bytes());
+
+        // Tag 0: size=40, offset=0
+        data[4096 - 4..4096].copy_from_slice(&40u32.to_le_bytes());
+        // Tag 1: size=8, offset=0
+        data[4096 - 8..4096 - 4].copy_from_slice(&8u32.to_le_bytes());
+
+        let page = EsePage {
+            page_number: 1,
+            data,
+        };
+        let tags = page.tags().expect("tags should parse successfully");
+        assert_eq!(tags.len(), 2);
+
+        let raw = page.raw_data_area().expect("raw_data_area should succeed");
+        // Tag array start is 4096 - (2 * 4) = 4088. Header end is 40.
+        assert_eq!(raw.len(), 4088 - 40);
     }
 }
